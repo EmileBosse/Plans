@@ -509,6 +509,7 @@ function openMenu(){ closeOverlays(); updateStatus(); $('menu').hidden = false; 
 $('btnMenu').addEventListener('click', openMenu);
 $('btnMenuClose').addEventListener('click', closeOverlays);
 $('btnRename').addEventListener('click', async () => {
+  closeOverlays();
   const v = await ask({title:'Nom du dessin', value:doc.name, ok:'Renommer'});
   if (v){ doc.name = v.replace(/\s+/g,' '); updateStatus(); saveNow(true); }
 });

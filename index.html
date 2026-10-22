@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Plans">
+<meta name="application-name" content="Plans">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="Dessiner des plans de coupe et les garder sur l’iPhone.">
+<title>Plans</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<canvas id="board" aria-label="Zone de dessin"></canvas>
+
+<div id="hint" hidden>
+  <span data-icon="pen"></span>
+  <b>Nouveau dessin</b>
+  <span>Dessinez avec le doigt.<br>Deux doigts pour zoomer ou vous déplacer.</span>
+</div>
+
+<!-- Haut gauche : menu -->
+<button class="fab" id="btnMenu" aria-label="Ouvrir le menu" aria-expanded="false" data-icon="chevDown"></button>
+
+<div class="menu" id="menu" hidden role="menu">
+  <button class="menu-head" id="btnRename" aria-label="Renommer le dessin"><b id="docName">Plan</b><span data-icon="pen"></span></button>
+  <div class="menu-status" id="saveStatus">Enregistré automatiquement</div>
+  <button class="menu-item" data-act="new" data-icon="fileNew">Nouveau dessin</button>
+  <button class="menu-item" data-act="list" data-icon="folder">Mes dessins</button>
+  <button class="menu-item" data-act="import" data-icon="download">Importer un dessin</button>
+  <button class="menu-item" data-act="export" data-icon="share">Exporter le dessin</button>
+  <div class="menu-foot"><button id="btnMenuClose" aria-label="Fermer le menu" data-icon="chevUp"></button></div>
+</div>
+
+<!-- Haut droite : annuler / rétablir / quadrillage -->
+<div class="top-right">
+  <div class="pill">
+    <button id="btnUndo" aria-label="Annuler" data-icon="undo"></button>
+    <button id="btnRedo" aria-label="Rétablir" data-icon="redo"></button>
+  </div>
+  <button class="fab" id="btnGrid" aria-label="Quadrillage" aria-pressed="false" data-icon="grid"></button>
+</div>
+
+<button id="zoomPill" hidden aria-label="Recentrer le dessin">100 %</button>
+
+<!-- Barre d'outils -->
+<nav class="toolbar" aria-label="Outils">
+  <button class="tool" data-tool="pen" aria-pressed="true"><span data-icon="pen"></span>Crayon</button>
+  <button class="tool" data-tool="shape" id="toolShape" aria-pressed="false" aria-label="Ligne et formes (maintenir pour choisir)"><span id="shapeIco"></span><span id="shapeLbl">Ligne</span><i class="more"></i></button>
+  <button class="tool" data-tool="text" aria-pressed="false"><span data-icon="text"></span>Texte</button>
+  <button class="tool" data-tool="move" aria-pressed="false"><span data-icon="move"></span>Déplacer</button>
+  <button class="tool" id="toolColor" aria-label="Couleur et épaisseur"><span class="swatch-ico" id="colorIco"></span>Couleur</button>
+</nav>
+
+<div class="pop" id="popShapes" hidden>
+  <h3>Formes</h3>
+  <div class="shape-grid" id="shapeGrid"></div>
+</div>
+
+<div class="pop" id="popColors" hidden>
+  <h3>Couleur</h3>
+  <div class="colors" id="colorGrid"></div>
+  <div class="sep"></div>
+  <h3>Épaisseur</h3>
+  <div class="widths" id="widthGrid"></div>
+</div>
+
+<div id="selBar" hidden>
+  <button id="btnDup" data-icon="copy">Dupliquer</button>
+  <button id="btnDel" class="danger" data-icon="trash">Supprimer</button>
+</div>
+
+<div class="scrim" id="scrim" hidden></div>
+
+<section class="sheet" id="sheetList" hidden aria-label="Mes dessins">
+  <div class="sheet-grab"></div>
+  <div class="sheet-head"><h2>Mes dessins</h2><button data-close aria-label="Fermer" data-icon="x"></button></div>
+  <div class="sheet-body"><div class="cards" id="cards"></div></div>
+</section>
+
+<section class="sheet" id="sheetExport" hidden aria-label="Exporter le dessin">
+  <div class="sheet-grab"></div>
+  <div class="sheet-head"><h2>Exporter le dessin</h2><button data-close aria-label="Fermer" data-icon="x"></button></div>
+  <div class="sheet-body">
+    <button class="opt" id="expPng"><span data-icon="image"></span><div><b>Image (PNG)</b><span>Pour l’envoyer par texto, courriel ou l’imprimer</span></div></button>
+    <button class="opt" id="expPlan"><span data-icon="file"></span><div><b>Fichier modifiable (.plan)</b><span>Pour le rouvrir plus tard avec « Importer un dessin »</span></div></button>
+  </div>
+</section>
+
+<div class="dlg-wrap" id="dlg" hidden>
+  <form class="dlg" id="dlgForm">
+    <label for="dlgInput" id="dlgTitle">Ajouter du texte</label>
+    <textarea id="dlgInput" rows="2" autocomplete="off" autocapitalize="sentences"></textarea>
+    <div class="help" id="dlgHelp" hidden></div>
+    <div class="dlg-actions">
+      <button type="button" id="dlgCancel">Annuler</button>
+      <button type="submit" class="primary" id="dlgOk">Ajouter</button>
+    </div>
+  </form>
+</div>
+
+<input type="file" id="fileIn" accept="image/*,.json,application/json" hidden>
+<div id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

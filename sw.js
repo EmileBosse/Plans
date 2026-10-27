@@ -2,7 +2,7 @@
 // Stratégie « stale-while-revalidate » : on sert la copie en cache tout de suite et on la met
 // à jour en arrière-plan, donc une nouvelle version arrive au lancement suivant.
 // Changer VERSION quand la liste SHELL change.
-const VERSION = 'plans-v1';
+const VERSION = 'plans-v2';
 const SHELL = [
   './',
   'index.html',

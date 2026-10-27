@@ -561,19 +561,26 @@ $('cards').addEventListener('click', async e => {
 
 /* Exporter */
 // La feuille de partage d'iOS exige un geste de l'utilisateur : le fichier est donc préparé de façon synchrone.
+// Chrome (Android, ordinateur) répond oui à canShare pour un .json mais refuse ensuite le partage :
+// on télécharge alors le fichier. Seule l'annulation par l'utilisateur (AbortError) ne fait rien.
 function share(blob, name){
   const file = new File([blob], name, {type:blob.type});
   if (navigator.canShare && navigator.canShare({files:[file]}))
-    return navigator.share({files:[file], title:doc.name}).catch(() => {});
+    return navigator.share({files:[file], title:doc.name}).catch(err => { if (err.name !== 'AbortError') download(blob, name); });
+  download(blob, name);
+}
+function download(blob, name){
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`« ${name} » est téléchargé.`);
 }
 function dataUrlToBlob(url){
   const [head, b64] = url.split(','), bin = atob(b64), buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return new Blob([buf], {type:head.slice(5, head.indexOf(';'))});
 }
-const safeName = () => (doc.name || 'plan').replace(/[\\/:*?"<>|]+/g, '-');
+// « Plan du 27 oct. » finit par un point : on l'enlève pour éviter « oct..plan.json »
+const safeName = () => (doc.name || 'plan').replace(/[\\/:*?"<>|]+/g, '-').replace(/[.\s]+$/, '') || 'plan';
 $('expPng').addEventListener('click', () => {
   if (!objs.length){ toast('Le dessin est vide.'); return; }
   const b = union(objs), bw = b.r-b.l, bh = b.b-b.t, s = Math.min(2, 4000/bw, 4000/bh);

@@ -81,8 +81,9 @@ button{font-family:inherit;color:inherit;touch-action:manipulation;cursor:pointe
 
 /* Sélection (outil Déplacer) */
 #selBar{position:fixed;display:flex;gap:6px;transform:translateX(-50%)}
-#selBar button{height:44px;border:0;border-radius:22px;padding:0 16px 0 12px;display:flex;align-items:center;gap:6px;font-size:14.5px;font-weight:600;background:var(--ink);color:#fff;box-shadow:var(--shadow);white-space:nowrap}
+#selBar button{height:44px;border:0;border-radius:22px;padding:0 14px 0 11px;display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600;background:var(--ink);color:#fff;box-shadow:var(--shadow);white-space:nowrap}
 #selBar button.danger{background:var(--danger)}
+#btnGroup,#btnUngroup{background:var(--accent)!important}
 #selBar svg{width:18px;height:18px}
 
 /* Feuilles du bas (Mes dessins, Exporter) */

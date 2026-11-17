@@ -25,6 +25,8 @@ const I = {
   trash:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
   copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h8"/>',
   x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  group:'<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M11 7h3a3 3 0 013 3v3M13 17h-3a3 3 0 01-3-3v-3"/>',
+  ungroup:'<rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/><path d="M15 4l5 5M20 4l-5 5"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
   file:'<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>'
 };
@@ -50,8 +52,9 @@ const cv = $('board'), ctx = cv.getContext('2d'), mctx = document.createElement(
 let W = innerWidth, H = innerHeight, DPR = 1;
 const view = {x:W/2, y:H/2, s:1};
 let objs = [], hist = [], fut = [], draft = null, action = null, gesture = null, textAt = null;
-const S = {tool:'pen', shape:'line', color:COLORS[0][0], width:4, grid:false, sel:null};
-let doc = null, lastSaved = null, saveTimer = null, saveOk = true, shapeTipShown = false;
+// sel : les éléments sélectionnés (un groupe uni est toujours sélectionné en entier)
+const S = {tool:'pen', shape:'line', color:COLORS[0][0], width:4, grid:false, sel:[]};
+let doc = null, lastSaved = null, saveTimer = null, saveOk = true, shapeTipShown = false, moveTipShown = false;
 const pointers = new Map();
 
 /* ---------- Stockage ---------- */
@@ -124,7 +127,7 @@ function updateStatus(){
 function openDoc(d, stored = true){
   doc = {id:d.id, name:d.name, created:d.created || Date.now(), stored};
   objs = (d.objs || []).map(o => hydrate({...o}));
-  hist = []; fut = []; S.sel = null; lastSaved = stored ? d.updated || null : null;
+  hist = []; fut = []; S.sel = []; lastSaved = stored ? d.updated || null : null;
   if (stored) LS.set(CUR, doc.id);
   fitView(); updateUI(); updateStatus(); render();
 }
@@ -171,6 +174,24 @@ function translate(o,dx,dy){
   o.x1 += dx; o.y1 += dy; if (o.x2 != null){ o.x2 += dx; o.y2 += dy; }
 }
 const snap = p => S.grid ? {x:Math.round(p.x/GRID)*GRID, y:Math.round(p.y/GRID)*GRID} : p;
+// sans quadrillage, une ligne tirée depuis (ax, ay) se redresse à 0/45/90° si elle en est à moins d'environ 5°
+function straighten(ax, ay, s){
+  if (S.grid) return s;
+  const dx = s.x-ax, dy = s.y-ay, a = Math.atan2(dy,dx), st = Math.PI/4, sa = Math.round(a/st)*st, L = Math.hypot(dx,dy);
+  return Math.abs(a-sa) < .09 ? {x:ax + Math.cos(sa)*L, y:ay + Math.sin(sa)*L} : s;
+}
+const ENDS = ['line','arrow','dim'];
+const groupOf = o => o.g ? objs.filter(x => x.g === o.g) : [o];
+// bout de ligne, de flèche ou de cote sous le doigt (hors groupe uni), le plus récent d'abord
+function endpointHit(p){
+  const tol = 22 / view.s;
+  for (let i = objs.length - 1; i >= 0; i--){
+    const o = objs[i]; if (!ENDS.includes(o.t) || o.g) continue;
+    const d1 = Math.hypot(p.x-o.x1, p.y-o.y1), d2 = Math.hypot(p.x-o.x2, p.y-o.y2);
+    if (Math.min(d1, d2) < tol) return {o, n:d2 <= d1 ? 2 : 1};
+  }
+  return null;
+}
 
 /* ---------- Rendu ---------- */
 function drawObj(c,o){
@@ -257,16 +278,33 @@ function render(){
   ctx.setTransform(DPR*view.s, 0, 0, DPR*view.s, DPR*view.x, DPR*view.y);
   objs.forEach(o => drawObj(ctx,o));
   if (draft) drawObj(ctx, draft);
+  if (action && action.k === 'box'){                       // rectangle de sélection en cours
+    const l = Math.min(action.a.x, action.b.x), t = Math.min(action.a.y, action.b.y);
+    ctx.save(); ctx.fillStyle = 'rgba(37,99,235,.08)'; ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 1.5 / view.s;
+    ctx.setLineDash([6/view.s, 4/view.s]);
+    ctx.fillRect(l, t, Math.abs(action.b.x-action.a.x), Math.abs(action.b.y-action.a.y));
+    ctx.strokeRect(l, t, Math.abs(action.b.x-action.a.x), Math.abs(action.b.y-action.a.y)); ctx.restore();
+  }
   const bar = $('selBar');
-  if (S.sel && objs.includes(S.sel)){
-    const b = bbox(S.sel), m = 6 / view.s;
+  S.sel = S.sel.filter(o => objs.includes(o));
+  if (S.sel.length){
+    const b = union(S.sel), m = 6 / view.s, one = S.sel.length === 1 && ENDS.includes(S.sel[0].t) ? S.sel[0] : null;
     ctx.save(); ctx.strokeStyle = '#2563eb'; ctx.lineWidth = 1.5 / view.s; ctx.setLineDash([6/view.s, 4/view.s]);
-    ctx.strokeRect(b.l-m, b.t-m, b.r-b.l+2*m, b.b-b.t+2*m); ctx.restore();
+    if (!one) ctx.strokeRect(b.l-m, b.t-m, b.r-b.l+2*m, b.b-b.t+2*m);
+    if (one){                                               // poignées pour allonger la ligne ou la cote
+      ctx.setLineDash([]); ctx.fillStyle = '#fff'; ctx.lineWidth = 2.5 / view.s;
+      for (const [x,y] of [[one.x1,one.y1],[one.x2,one.y2]]){ ctx.beginPath(); ctx.arc(x, y, 8 / view.s, 0, Math.PI*2); ctx.fill(); ctx.stroke(); }
+    }
+    ctx.restore();
+    const grouped = S.sel.every(o => o.g && o.g === S.sel[0].g);
+    $('btnGroup').hidden = S.sel.length < 2 || grouped;
+    $('btnUngroup').hidden = !$('btnGroup').hidden || !S.sel.some(o => o.g);
+    bar.hidden = !!action;
+    const half = bar.offsetWidth / 2 + 8;
     const sx = (b.l+b.r)/2*view.s + view.x; let sy = (b.t-m)*view.s + view.y - 56;
     if (sy < 76) sy = (b.b+m)*view.s + view.y + 12;
-    bar.style.left = Math.max(130, Math.min(W-130, sx)) + 'px'; bar.style.top = Math.min(H-170, Math.max(76, sy)) + 'px';
-    bar.hidden = !!action;
-  } else { S.sel = null; bar.hidden = true; }
+    bar.style.left = Math.max(half, Math.min(W-half, sx)) + 'px'; bar.style.top = Math.min(H-170, Math.max(76, sy)) + 'px';
+  } else bar.hidden = true;
   $('hint').hidden = !doc || objs.length > 0 || !!draft;
 }
 function renderTo(list, w, h, pad){
@@ -296,8 +334,8 @@ function resize(){
 /* ---------- Historique ---------- */
 function snapshot(){ hist.push(ser(objs)); if (hist.length > 100) hist.shift(); fut = []; }
 function changed(){ updateUI(); render(); scheduleSave(); }
-function undo(){ if (!hist.length) return; fut.push(ser(objs)); objs = deser(hist.pop()); S.sel = null; changed(); }
-function redo(){ if (!fut.length) return; hist.push(ser(objs)); objs = deser(fut.pop()); S.sel = null; changed(); }
+function undo(){ if (!hist.length) return; fut.push(ser(objs)); objs = deser(hist.pop()); S.sel = []; changed(); }
+function redo(){ if (!fut.length) return; hist.push(ser(objs)); objs = deser(fut.pop()); S.sel = []; changed(); }
 
 /* ---------- Pointeurs sur la zone de dessin ---------- */
 function anyOverlayOpen(){ return !$('menu').hidden || !$('popShapes').hidden || !$('popColors').hidden; }
@@ -319,14 +357,17 @@ cv.addEventListener('pointerdown', e => {
   else if (S.tool === 'shape'){ const s = snap(p); draft = {t:S.shape, ...base, x1:s.x, y1:s.y, x2:s.x, y2:s.y}; action = 'draw'; }
   else if (S.tool === 'text'){ textAt = p; action = 'text'; }
   else if (S.tool === 'move'){
-    const hit = hitTest(p);
-    if (hit){ S.sel = hit; action = {k:'drag', last:p, moved:false}; }
-    else { S.sel = null; action = {k:'pan', sx:e.clientX, sy:e.clientY, vx:view.x, vy:view.y}; }
+    // priorité : un bout de ligne/cote (allonger), puis un élément (déplacer la sélection ou son groupe),
+    // sinon un rectangle de sélection sur une zone vide
+    const end = endpointHit(p), hit = end ? null : hitTest(p);
+    if (end){ S.sel = [end.o]; action = {k:'end', o:end.o, n:end.n, moved:false}; }
+    else if (hit){ if (!S.sel.includes(hit)) S.sel = groupOf(hit); action = {k:'drag', last:p, moved:false}; }
+    else { S.sel = []; action = {k:'box', a:p, b:p}; }
   }
   render();
 });
 // un déplacement interrompu par un 2e doigt est annulé, sans laisser d'entrée « rétablir »
-function undoSilently(){ objs = deser(hist.pop()); S.sel = null; updateUI(); }
+function undoSilently(){ objs = deser(hist.pop()); S.sel = []; updateUI(); }
 cv.addEventListener('pointermove', e => {
   if (!pointers.has(e.pointerId)) return;
   pointers.set(e.pointerId, {x:e.clientX, y:e.clientY});
@@ -347,16 +388,18 @@ cv.addEventListener('pointermove', e => {
     if (draft.t === 'circle' || draft.t === 'sphere' || draft.t === 'hole'){   // garder rond
       const dx = s.x-draft.x1, dy = s.y-draft.y1, n = Math.max(Math.abs(dx), Math.abs(dy));
       s = {x:draft.x1 + Math.sign(dx||1)*n, y:draft.y1 + Math.sign(dy||1)*n};
-    } else if ((draft.t === 'line' || draft.t === 'arrow' || draft.t === 'dim') && !S.grid){   // redresse à 0/45/90°
-      const dx = s.x-draft.x1, dy = s.y-draft.y1, a = Math.atan2(dy,dx), st = Math.PI/4, sa = Math.round(a/st)*st, L = Math.hypot(dx,dy);
-      if (Math.abs(a-sa) < .09) s = {x:draft.x1 + Math.cos(sa)*L, y:draft.y1 + Math.sin(sa)*L};
-    }
+    } else if (ENDS.includes(draft.t)) s = straighten(draft.x1, draft.y1, s);
     draft.x2 = s.x; draft.y2 = s.y;
   } else if (action.k === 'drag'){
     if (!action.moved){ snapshot(); action.moved = true; }
-    translate(S.sel, p.x-action.last.x, p.y-action.last.y); action.last = p;
-  } else if (action.k === 'pan'){
-    view.x = action.vx + e.clientX - action.sx; view.y = action.vy + e.clientY - action.sy;
+    S.sel.forEach(o => translate(o, p.x-action.last.x, p.y-action.last.y)); action.last = p;
+  } else if (action.k === 'end'){                         // allonger : le bout bouge, l'autre reste fixe
+    if (!action.moved){ snapshot(); action.moved = true; }
+    const o = action.o, n = action.n, fx = n === 1 ? o.x2 : o.x1, fy = n === 1 ? o.y2 : o.y1;
+    const s = straighten(fx, fy, snap(p));
+    o['x'+n] = s.x; o['y'+n] = s.y;
+  } else if (action.k === 'box'){
+    action.b = p;
   }
   render();
 });
@@ -371,6 +414,12 @@ function endPointer(e){
     const hit = hitTest(textAt), p = textAt;
     action = null;
     if (hit && hit.t === 'text') editText(hit); else if (hit && hit.t === 'dim') askDim(hit); else addText(p);
+  } else if (action && action.k === 'box'){
+    // les éléments entièrement dans le rectangle, avec le reste de leur groupe
+    const l = Math.min(action.a.x, action.b.x), r = Math.max(action.a.x, action.b.x);
+    const t = Math.min(action.a.y, action.b.y), b = Math.max(action.a.y, action.b.y);
+    const inside = objs.filter(o => { const q = bbox(o); return q.l >= l && q.r <= r && q.t >= t && q.b <= b; });
+    S.sel = objs.filter(o => inside.some(i => i === o || (i.g && i.g === o.g)));
   } else if (action && action.moved){ changed(); }
   action = null; render();
 }
@@ -435,10 +484,16 @@ function ask({title, value = '', ok, help = '', multiline = false}){
 
 /* ---------- Barre d'outils ---------- */
 function savePrefs(){ LS.set(PREFS, {tool:S.tool === 'move' ? 'pen' : S.tool, shape:S.shape, color:S.color, width:S.width, grid:S.grid}); }
-function setTool(t){ S.tool = t; if (t !== 'move') S.sel = null; updateUI(); render(); }
+function setTool(t){ S.tool = t; if (t !== 'move') S.sel = []; updateUI(); render(); }
 document.querySelectorAll('.tool[data-tool]').forEach(b => {
   if (b.id === 'toolShape') return;
-  b.addEventListener('click', () => { closeOverlays(); setTool(b.dataset.tool); });
+  b.addEventListener('click', () => {
+    closeOverlays(); setTool(b.dataset.tool);
+    if (b.dataset.tool === 'move' && !moveTipShown){
+      moveTipShown = true;
+      toast('Astuce : glissez sur une zone vide pour sélectionner plusieurs éléments, puis « Unir ». Tirez le bout d’une ligne ou d’une cote pour l’allonger.');
+    }
+  });
 });
 const shapeBtn = $('toolShape'); let lpTimer, lpFired = false;
 shapeBtn.addEventListener('pointerdown', () => {
@@ -462,7 +517,7 @@ $('colorGrid').innerHTML = COLORS.map(([c,n]) => `<button data-color="${c}" aria
 $('colorGrid').addEventListener('click', e => { const b = e.target.closest('[data-color]'); if (!b) return; S.color = b.dataset.color; recolorSel(); updateUI(); });
 $('widthGrid').innerHTML = WIDTHS.map(([w,n]) => `<button data-width="${w}" aria-pressed="false"><i style="height:${Math.max(2,w)}px"></i>${n}</button>`).join('');
 $('widthGrid').addEventListener('click', e => { const b = e.target.closest('[data-width]'); if (!b) return; S.width = +b.dataset.width; updateUI(); });
-function recolorSel(){ if (S.tool === 'move' && S.sel){ snapshot(); S.sel.c = S.color; changed(); } }
+function recolorSel(){ if (S.tool === 'move' && S.sel.length){ snapshot(); S.sel.forEach(o => o.c = S.color); changed(); } }
 
 $('btnGrid').addEventListener('click', () => {
   S.grid = !S.grid; updateUI(); render();
@@ -470,15 +525,30 @@ $('btnGrid').addEventListener('click', () => {
 });
 $('btnUndo').addEventListener('click', undo);
 $('btnRedo').addEventListener('click', redo);
-$('btnDel').addEventListener('click', () => { if (!S.sel) return; snapshot(); objs.splice(objs.indexOf(S.sel), 1); S.sel = null; changed(); });
+$('btnDel').addEventListener('click', () => { if (!S.sel.length) return; snapshot(); objs = objs.filter(o => !S.sel.includes(o)); S.sel = []; changed(); });
 $('btnDup').addEventListener('click', () => {
-  if (!S.sel) return; snapshot();
-  const c = hydrate(JSON.parse(ser([S.sel]))[0]); translate(c, 20, 20); objs.push(c); S.sel = c; changed();
+  if (!S.sel.length) return; snapshot();
+  const ids = {};                                          // la copie d'un groupe forme un nouveau groupe
+  const copies = JSON.parse(ser(S.sel)).map(c => {
+    hydrate(c); translate(c, 20, 20);
+    if (c.g) c.g = ids[c.g] || (ids[c.g] = uid());
+    return c;
+  });
+  objs.push(...copies); S.sel = copies; changed();
+});
+$('btnGroup').addEventListener('click', () => {
+  if (S.sel.length < 2) return; snapshot();
+  const g = uid(); S.sel.forEach(o => o.g = g); changed();
+  toast('Éléments unis — toucher l’un d’eux sélectionne tout le groupe.');
+});
+$('btnUngroup').addEventListener('click', () => {
+  if (!S.sel.some(o => o.g)) return; snapshot();
+  S.sel.forEach(o => delete o.g); changed();
 });
 addEventListener('keydown', e => {
   if (!$('dlg').hidden) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
-  if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) $('btnDel').click();
+  if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel.length) $('btnDel').click();
   if (e.key === 'Escape'){ closeOverlays(); closeSheets(); }
 });
 
